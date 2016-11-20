@@ -1,0 +1,411 @@
+---
+title: "Interview_Upgrad"
+author: "Milan A Joshi"
+date: "16 October 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Reading data Sets and knowing structure
+```{r}
+basedt <-read.csv("baseball_train.csv")
+
+baseball_unknown<-read.csv("baseball_unknown.csv")
+
+str(basedt)
+```
+#Coverting Playoffs(Response) to factor
+```{r}
+basedt$Playoffs<-as.factor(basedt$Playoffs)
+
+str(basedt)
+```
+#Removing unnecessary columns and calcuting summary statistics
+```{r}
+basedt<-basedt[,-c(1,2)]
+
+summary(basedt)
+```
+#Loading caret package for preprocessing scaling and centering
+```{r}
+
+library(caret)
+
+dt<-as.data.frame(basedt[,c(1,2)])
+
+prpc<-preProcess(dt, method = c("center", "scale", "YeoJohnson"))
+
+dt<-predict(prpc, newdata = dt)
+
+basedt<-cbind(dt,basedt[,-c(1,2)])
+
+summary(basedt)
+
+str(basedt)
+
+```
+## Exploratory Analysis
+# Analyzing Missing value in data
+```{r}
+
+Missingvalues<-apply(basedt,2,function(x) sum(is.na(x)))
+
+Missingvalues
+
+```
+#Visualizing Missing value pattern with library VIM
+```{r echo=FALSE}
+library(VIM)
+
+aggr_plot <- aggr(basedt, col=c('navyblue','red'), numbers=TRUE,     
+                  
+                  sortVars=TRUE, labels=names(basedt), cex.axis=.7,   
+                  
+                  gap=3, ylab=c("Histogram of missing data","Pattern"))
+```
+# Proportion of Playoffs 0-1 with ggplot2
+```{r echo=FALSE}
+library(ggplot2)
+
+library(scales)
+
+ggplot(basedt, aes(x = as.factor(Playoffs))) +
+  
+  geom_bar(aes(y = (..count..)/sum(..count..))) +
+  
+  geom_text(aes(y = ((..count..)/sum(..count..)), 
+                
+                label = scales::percent((..count..)/sum(..count..))), 
+            
+                stat = "count", vjust = -0.25) +   
+           
+                 scale_y_continuous(labels = percent) +
+  
+  labs(title = "Playoffs 0 vs 1", y = "Percent", x = "Playoffs")
+
+```
+# Analysing Numeric Varibable using correlations and Densities        AppliedpredictiveModeling Library
+
+```{r echo=FALSE,warning=FALSE}
+
+library(AppliedPredictiveModeling)
+
+transparentTheme(trans = .5)
+
+
+featurePlot(x = basedt[, 1:5],y = basedt$Playoffs,plot = "pairs",
+            
+            ## Add a key at the top
+            
+            auto.key = list(columns = 2))
+
+
+transparentTheme(trans = .9)
+
+featurePlot(x = basedt[, 1:5], 
+            
+            y = basedt$Playoffs,
+            
+            plot = "density", 
+            
+            ## Pass in options to xyplot() to
+            
+            ## make it prettier
+            
+            scales = list(x = list(relation="free"), 
+                          
+                          y = list(relation="free")), 
+            adjust = 1.5, 
+            
+            pch = "|", 
+            
+            layout = c(5, 1), 
+            
+            auto.key = list(columns = 2))
+
+featurePlot(x = basedt[, 1:5], 
+            
+            y = basedt$Playoffs, 
+            
+            plot = "box", 
+            
+            ## Pass in options to bwplot() 
+            
+            scales = list(y = list(relation="free"),
+                  
+                                  x = list(rot = 90)),  
+            layout = c(5,1 ), 
+            
+            auto.key = list(columns = 2))
+```
+#Plotting correlations using PerformanceAnalytics with Densities
+```{r echo=FALSE}
+
+library(PerformanceAnalytics)
+
+library(corrplot)
+
+library(Hmisc)
+
+my_data <- basedt[, c(1,2,3,4,5)]
+
+chart.Correlation(my_data, histogram=TRUE, pch=19)
+
+corrln <- cor(basedt[,1:5])
+
+my_dt<-as.matrix(round(corrln, 2))
+
+corrplot(my_dt, type = "upper", order = "hclust",tl.col = "black", 
+         
+           tl.srt = 45)
+
+```
+# Data Spliting 70-30 train-test
+```{r}
+set.seed(998)
+
+inTraining <- createDataPartition(basedt$Playoffs, p = .70, list = FALSE)
+
+train <- basedt[ inTraining,]
+
+test <- basedt[-inTraining,]
+
+train$Playoffs<-as.factor(train$Playoffs)
+
+test$Playoffs<-as.factor(test$Playoffs)
+
+```
+# Model tuning 10 fold crossvalidation tuning parameters
+```{r}
+
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 10,
+                           repeats = 10,
+                           ## Estimate class probabilities
+                           classProbs = TRUE,
+                           ## Evaluate performance using 
+                           ## the following function
+                           summaryFunction = twoClassSummary)
+
+```
+## Training gbm randomForest extraTree Logistic Regression svm(Kernel)
+# Training gbm
+```{r echo = FALSE}
+
+set.seed(1001)
+
+gbmFit<- train(Playoffs ~ ., data = train, 
+                    method = "gbm", 
+                    trControl = fitControl,
+                    ## This last option is actually one
+                    ## for gbm() that passes through
+                    verbose = FALSE)
+gbmFit
+
+trellis.par.set(caretTheme())
+
+plot(gbmFit)
+
+```
+# Performance of gbm on tset set
+```{r}
+test$pred <- predict(gbmFit, newdata =test)
+
+confusionMatrix(data = test$pred, reference = test$Playoffs)
+```
+# Training RandomForest 
+```{r }
+set.seed(1002)
+
+rfFit<- train(Playoffs~ ., data = train, 
+                    method = "rf", 
+                    trControl = fitControl, 
+                    #preProc = c("center", "scale"),
+                    tuneLength = 8,
+                    metric = "ROC")
+rfFit
+
+trellis.par.set(caretTheme())
+
+plot(rfFit)
+```
+# Predicting RandomForest on test Data 
+```{r}
+
+test$pred <- predict(rfFit, newdata =test)
+
+confusionMatrix(data = test$pred, reference = test$Playoffs)
+
+```
+# Model Tuning for extraTree
+```{r}
+set.seed(997)
+
+cctrl<- trainControl(method = "cv", number = 10, repeats=10,
+                     
+                     returnResamp = "all")
+```
+# Training extraTree Model
+```{r echo= FALSE}
+set.seed(1003)
+
+extraTreeFit<- train(Playoffs~.,data=train ,
+                        method = "extraTrees", 
+                        trControl = cctrl,
+                        #preProc = c("center", "scale"),
+                        ntree = 50)
+
+extraTreeFit
+
+trellis.par.set(caretTheme())
+
+plot(extraTreeFit)
+```
+# Performance extraTree and Predction on test set
+```{r }
+test$pred <- predict(extraTreeFit, newdata =test)
+
+confusionMatrix(data = test$pred, reference = test$Playoffs)
+```
+# Training Logistic Regression
+```{r }
+set.seed(1004)
+
+logitFit<- train(Playoffs ~. 
+                    ,data=train, method="glm", 
+                       trControl = fitControl,family="binomial")
+
+logitFit
+
+summary(logitFit)
+```
+# Performance Logistic Regression and prediction on test set
+```{r }
+
+test$pred <- predict(logitFit, newdata =test)
+
+confusionMatrix(data = test$pred, reference = test$Playoffs)
+```
+# Training Support vector machine with gaussian kernel
+```{r echo=FALSE}
+
+set.seed(1005)
+
+svmFit<-train(Playoffs~., data = train, 
+              method = "svmRadial", 
+              trControl = fitControl, 
+              #preProc = c("center", "scale"),
+              #tuneLength = 8,
+              metric = "ROC")
+svmFit
+
+test$pred <- predict(svmFit, newdata =test)
+
+confusionMatrix(data = test$pred, reference = test$Playoffs) 
+
+svmFit
+
+trellis.par.set(caretTheme())
+
+plot(extraTreeFit)
+
+```
+# Performance and prediction of svm on test set
+```{r }
+
+test$pred <- predict(svmFit, newdata =test)
+
+confusionMatrix(data = test$pred, reference = test$Playoffs) 
+```
+# Model Comaparison
+```{r echo=FALSE}
+resamps <- resamples(list(GBM = gbmFit,
+                          SVM = svmFit,
+                          RDF = rfFit,
+                          #ExTr=extraTree,
+                          LogisTicReg=logitFit))
+                          
+resamps
+
+trellis.par.set(theme)
+
+bwplot(resamps, layout = c(3, 1))
+
+trellis.par.set(caretTheme())
+
+dotplot(resamps, metric = "ROC")
+
+splom(resamps)
+```
+# Plot of difference between Accuracy Metrics
+```{r echo= FALSE}
+
+difValues <- diff(resamps)
+
+difValues
+
+summary(difValues)
+
+trellis.par.set(theme)
+
+bwplot(difValues, layout = c(3, 1))
+
+trellis.par.set(caretTheme())
+
+dotplot(difValues)
+```
+#variable Importance in each model
+```{r echo = FALSE}
+
+gbmImp <- varImp(gbmFit, scale = FALSE)
+
+gbmImp
+
+plot(gbmImp, top = 3)
+
+rfImp <- varImp(rfFit, scale = FALSE)
+
+rfImp
+
+plot(rfImp, top = 3)
+
+ETImp <- varImp(extraTreeFit, scale = FALSE)
+
+ETImp
+
+plot(ETImp, top = 3)
+
+logitImp <- varImp(logitFit, scale = FALSE)
+
+logitImp
+
+plot(logitImp, top = 3)
+
+svmImp <- varImp(svmFit, scale = FALSE)
+
+svmImp
+
+plot(svmImp, top = 20)
+```
+# Most Important variables using simulatedAnneling
+```{r echo=FALSE}
+sa_ctrl <- safsControl(functions = rfSA,
+                       method = "repeatedcv",
+                       repeats = 5,
+                       improve = 50)
+
+set.seed(10)
+
+rf_sa <- safs(x = train[,-6], y =train$Playoffs,
+              iters = 200,
+              safsControl = sa_ctrl)
+rf_sa
+
+library(ggplot2)
+
+plot(rf_sa) + theme_bw()
+```
+
